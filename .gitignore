@@ -1,0 +1,20 @@
+# Node
+node_modules/
+dist/
+.env
+
+# Flutter
+.dart_tool/
+.idea/
+.vscode/
+build/
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.framework
+ios/Flutter/App.framework
+android/.gradle
+android/app/build/
+android/local.properties
+web/build/
+*.iml
+pubspec.lock
