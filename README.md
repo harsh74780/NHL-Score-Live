@@ -18,6 +18,11 @@ The project is divided into two main parts:
 *   **Tech Stack**: Node.js, TypeScript, Firebase Admin SDK.
 *   **Function**: Fetches data from the official NHL API and syncs it to **Cloud Firestore**.
 *   **Key Script**: `ingest.ts` (Polls for live updates).
+      Implements a Dynamic Polling Strategy:
+     -Live Game: Polls every 60 seconds.
+     -Scheduled: Sleeps until 5 minutes before puck drop.
+     -Off-Hours: Sleeps for 1 hour to conserve resources.
+
 
 ### 2. Frontend (`/app`)
 *   **Tech Stack**: Flutter (Dart), Cloud Firestore.
@@ -39,7 +44,7 @@ The project is divided into two main parts:
     cd NHL-Score-Live
     ```
 
-2.  **Backend Setup:**
+2.  **Backend Setup (Terminal 1):**
     *   Place your `serviceAccountKey.json` in `backend/`.
     *   Install dependencies:
         ```bash
@@ -51,7 +56,7 @@ The project is divided into two main parts:
         npx ts-node src/ingest.ts
         ```
 
-3.  **Frontend Setup:**
+3.  **Frontend Setup (Terminal 2):**
     *   Ensure `firebase_options.dart` is configured in `app/lib/`.
     *   Run the app:
         ```bash
