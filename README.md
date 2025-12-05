@@ -61,7 +61,20 @@ The project is divided into two main parts:
 
 ## 📸 Screenshots
 
-*(Add your screenshots here)*
+## 📸 Screenshots
+
+| **Home Screen** | **Game Details** |
+|:---:|:---:|
+| <img src="screenshots/home_screen.png" width="300" /> | <img src="screenshots/game_detail.png" width="300" /> |
+
+| **Team Details** | **Schedule (Results)** |
+|:---:|:---:|
+| <img src="screenshots/team_detail.png" width="300" /> | <img src="screenshots/results_tab.png" width="300" /> |
+
+| **Schedule (Upcoming)** |
+|:---:|
+| <img src="screenshots/upcoming_tab.png" width="300" /> |
+
 
 ## 📄 License
 
