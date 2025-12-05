@@ -78,3 +78,10 @@ The project is divided into two main parts:
 ## 📄 License
 
 MIT
+
+## 🎥 Presentation
+
+To view the project presentation:
+1. Navigate to the `presentation/` folder.
+2. Open `presentation.html` in your web browser.
+
