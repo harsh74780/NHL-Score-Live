@@ -59,7 +59,6 @@ The project is divided into two main parts:
         flutter run -d chrome
         ```
 
-## 📸 Screenshots
 
 ## 📸 Screenshots
 
