@@ -59,7 +59,7 @@ The project is divided into two main parts:
     *   Run the app:
         ```bash
         cd app
-        flutter run -d chrome --web-renderer html
+        flutter run -d chrome  
         ```
 
 
