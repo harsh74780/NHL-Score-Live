@@ -15,6 +15,9 @@ export interface NHLGameRaw {
   // Add venue so we can read game.venue.default
   venue?: { default: string };
   tvBroadcasts?: Array<{ market: string; network: string }>;
+  winningGoalScorer?: { lastName: { default: string } };
+  periodDescriptor?: { number: number; periodType: string };
+  clock?: { timeRemaining: string; inIntermission: boolean };
   homeTeam: NHLTeamRaw;
   awayTeam: NHLTeamRaw;
 }
@@ -45,6 +48,9 @@ export interface FirestoreGame {
   // Add these fields so we can save them to Firestore
   venue: string;
   broadcasts: string;
+  winningGoalScorer?: string;
+  periodDescriptor?: string;
+  gameClock?: string;
   homeTeam: TeamSummary;
   awayTeam: TeamSummary;
   apiRaw?: any;
@@ -59,16 +65,19 @@ export interface TeamSummary {
   record: string;
 }
 
+export interface HistoryGame {
+  gameId: string;
+  opponent: string;
+  opponentLogo: string;
+  date: string;
+  score: string;
+  outcome: string;
+}
+
 export interface FirestoreTeam {
   teamId: string;
   name: string;
   record: string;
   logo: string;
-  last5Games: Array<{
-    gameId: string;
-    opponent: string;
-    date: string;
-    score: string;
-    outcome: string;
-  }>;
+  last5Games: HistoryGame[];
 }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import '../services/firestore_service.dart';
 import '../models/game_model.dart';
 import 'game_detail_screen.dart';
@@ -16,7 +17,17 @@ class GamesListScreen extends StatelessWidget {
       initialIndex: 1, // Default to TODAY
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('NHL Schedule'),
+          title: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SvgPicture.asset(
+                'assets/images/nhl_logo.svg',
+                height: 30, // Adjust size as needed
+              ),
+              const SizedBox(width: 8),
+              const Text('NHL Schedule'),
+            ],
+          ),
           bottom: const TabBar(
             indicatorColor: Colors.blueAccent,
             indicatorWeight: 3,
@@ -190,7 +201,8 @@ class GameCard extends StatelessWidget {
                           name: game.homeTeam.name.isNotEmpty ? game.homeTeam.name : game.homeTeam.abbrev,
                           record: game.homeTeam.record,
                           score: game.homeTeam.score,
-                          isWinner: game.status == 'Final' && game.homeTeam.score > game.awayTeam.score,
+                          logoUrl: game.homeTeam.logo, // Pass Logo URL
+                          isWinner: game.status == 'Final' && game.homeTeam.score > game.homeTeam.score,
                           gameStatus: game.status,
                         ),
                         const SizedBox(height: 12),
@@ -199,6 +211,7 @@ class GameCard extends StatelessWidget {
                           name: game.awayTeam.name.isNotEmpty ? game.awayTeam.name : game.awayTeam.abbrev,
                           record: game.awayTeam.record,
                           score: game.awayTeam.score,
+                          logoUrl: game.awayTeam.logo, // Pass Logo URL
                           isWinner: game.status == 'Final' && game.awayTeam.score > game.homeTeam.score,
                           gameStatus: game.status,
                         ),
@@ -217,22 +230,53 @@ class GameCard extends StatelessWidget {
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         if (game.status == 'Live')
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: Colors.redAccent.withOpacity(0.2),
-                              borderRadius: BorderRadius.circular(4),
-                              border: Border.all(color: Colors.redAccent, width: 1),
-                            ),
-                            child: const Text(
-                              "LIVE",
-                              style: TextStyle(
-                                color: Colors.redAccent,
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold,
+                          if (game.periodDescriptor != null)
+                             Column(
+                               children: [
+                                 Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.redAccent.withOpacity(0.2),
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(color: Colors.redAccent, width: 1),
+                                  ),
+                                  child: Text(
+                                    game.periodDescriptor!,
+                                    style: const TextStyle(
+                                      color: Colors.redAccent,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                                if (game.gameClock != null)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 4),
+                                    child: Text(
+                                      game.gameClock!,
+                                      style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                                      textAlign: TextAlign.center,
+                                    ),
+                                  ),
+                               ],
+                             )
+                          else
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.redAccent.withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(color: Colors.redAccent, width: 1),
                               ),
-                            ),
-                          )
+                              child: const Text(
+                                "LIVE",
+                                style: TextStyle(
+                                  color: Colors.redAccent,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            )
                         else
                           Text(
                             statusText,
@@ -276,6 +320,7 @@ class _TeamRowCompact extends StatelessWidget {
   final String name;
   final String record;
   final int score;
+  final String logoUrl;
   final bool isWinner;
   final String gameStatus;
 
@@ -283,7 +328,9 @@ class _TeamRowCompact extends StatelessWidget {
     required this.abbrev,
     required this.name,
     required this.record, 
+
     required this.score,
+    required this.logoUrl,
     required this.isWinner,
     required this.gameStatus,
   });
@@ -294,7 +341,7 @@ class _TeamRowCompact extends StatelessWidget {
     
     return Row(
       children: [
-        TeamLogo(teamAbbrev: abbrev, size: 28), // Slightly larger logo
+        TeamLogo(teamAbbrev: abbrev, logoUrl: logoUrl, size: 28), // Slightly larger logo
         const SizedBox(width: 12),
         
         Expanded(

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart'; // Import intl for date formatting
+import 'package:intl/intl.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import '../models/game_model.dart';
 import 'team_detail_screen.dart';
 import '../widgets/team_logo.dart';
@@ -19,7 +20,17 @@ class GameDetailScreen extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Game Details'),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SvgPicture.asset(
+              'assets/images/nhl_logo.svg',
+              height: 24,
+            ),
+            const SizedBox(width: 8),
+            const Text('Game Details'),
+          ],
+        ),
       ),
       body: BackgroundWrapper(
         child: SingleChildScrollView(
@@ -157,9 +168,18 @@ class GameDetailScreen extends StatelessWidget {
                     const Divider(color: Colors.white10, height: 30),
                     
                     // Venue
-                    _InfoRow(icon: Icons.stadium, text: game.venue),
+                    // Venue
+                    _InfoRow(icon: Icons.stadium, text: game.venue), // Use 'Arena' typically but stadium works
                     
-                    // Removed Broadcasts as requested
+                    if (game.broadcasts.isNotEmpty) ...[
+                      const Divider(color: Colors.white10, height: 30),
+                      _InfoRow(icon: Icons.tv, text: "TV: ${game.broadcasts}"),
+                    ],
+
+                    if (game.winningGoalScorer != null) ...[
+                      const Divider(color: Colors.white10, height: 30),
+                      _InfoRow(icon: Icons.star, text: "Winning Goal: ${game.winningGoalScorer}"),
+                    ],
                   ],
                 ),
               ),
@@ -205,7 +225,7 @@ class _TeamColumn extends StatelessWidget {
         children: [
           Hero(
             tag: 'team_logo_${team.abbrev}', // Smooth animation tag
-            child: TeamLogo(teamAbbrev: team.abbrev, size: 90),
+            child: TeamLogo(teamAbbrev: team.abbrev, logoUrl: team.logo, size: 90),
           ),
           const SizedBox(height: 16),
           Text(

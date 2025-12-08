@@ -34,12 +34,14 @@ class TeamModel {
 
 class PastGame {
   final String opponent;
+  final String opponentLogo;
   final String score;
   final String outcome; // "W", "L", "OT"
   final String date;
 
   PastGame({
     required this.opponent,
+    required this.opponentLogo,
     required this.score,
     required this.outcome,
     required this.date,
@@ -48,6 +50,7 @@ class PastGame {
   factory PastGame.fromMap(Map<String, dynamic> data) {
     return PastGame(
       opponent: data['opponent'] ?? '',
+      opponentLogo: data['opponentLogo'] ?? '',
       score: data['score'] ?? '',
       outcome: data['outcome'] ?? '-',
       date: data['date'] ?? '',

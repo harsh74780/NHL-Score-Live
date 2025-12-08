@@ -5,6 +5,10 @@ class GameModel {
   final String startTime;
   final String status;
   final String venue;
+  final String broadcasts;
+  final String? winningGoalScorer;
+  final String? periodDescriptor;
+  final String? gameClock;
   final TeamSummary homeTeam;
   final TeamSummary awayTeam;
 
@@ -13,6 +17,10 @@ class GameModel {
     required this.startTime,
     required this.status,
     required this.venue,
+    this.broadcasts = '',
+    this.winningGoalScorer,
+    this.periodDescriptor,
+    this.gameClock,
     required this.homeTeam,
     required this.awayTeam,
   });
@@ -30,6 +38,10 @@ class GameModel {
       startTime: data['startTime'] ?? '',
       status: data['status'] ?? 'Scheduled',
       venue: venueData,
+      broadcasts: data['broadcasts'] ?? '',
+      winningGoalScorer: data['winningGoalScorer'],
+      periodDescriptor: data['periodDescriptor'],
+      gameClock: data['gameClock'],
       homeTeam: TeamSummary.fromMap(data['homeTeam']),
       awayTeam: TeamSummary.fromMap(data['awayTeam']),
     );

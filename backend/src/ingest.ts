@@ -1,48 +1,48 @@
+import * as dotenv from 'dotenv';
+dotenv.config();
 import axios from 'axios';
-import * as admin from 'firebase-admin';
-import { FirestoreGame, FirestoreTeam, NHLScheduleResponse, NHLStandingsResponse, TeamSummary } from './types';
-import * as path from 'path';
+import { FirestoreGame, FirestoreTeam, HistoryGame } from './types';
+import { fetchStandings, fetchSchedule } from './services/nhlApi';
+import { initFirestore, batchSaveGames, batchSaveTeams } from './services/db';
+import { sleep, mapGameStatus } from './utils/helpers';
 
-// --- 1. Setup Firebase ---
-const serviceAccountPath = path.resolve(__dirname, '../serviceAccountKey.json');
-
-try {
-    const serviceAccount = require(serviceAccountPath);
-    if (admin.apps.length === 0) {
-        admin.initializeApp({
-            credential: admin.credential.cert(serviceAccount)
-        });
-    }
-} catch (error) {
-    console.error("ERROR: Could not find serviceAccountKey.json!");
-    process.exit(1);
-}
-
-const db = admin.firestore();
-const NHL_API_BASE = "https://api-web.nhle.com/v1";
+// Initialize DB
+initFirestore();
 
 // Memory storage
-let teamGameHistory: Record<string, any[]> = {};
-let teamRecordsMap: Record<string, any> = {};
+let teamGameHistory: Record<string, HistoryGame[]> = {};
+let teamRecordsMap: Record<string, { recordString: string, raw: any }> = {};
 
 async function main() {
     console.log("🏒 Starting NHL Smart Ingestor...");
 
+    let lastFullFetch = 0;
+    const FULL_FETCH_INTERVAL = 60 * 60 * 1000; // 1 hour
+
     while (true) {
         try {
-            console.log("\n--- 🔄 Cycle Start: " + new Date().toLocaleTimeString() + " ---");
+            const now = Date.now();
+            const isFullFetch = (now - lastFullFetch > FULL_FETCH_INTERVAL);
 
-            // Reset memory for this cycle to ensure fresh data
-            teamGameHistory = {};
-            teamRecordsMap = {};
+            console.log(`\n--- 🔄 Cycle Start: ${new Date().toLocaleTimeString()} (${isFullFetch ? 'Full' : 'Partial'} Fetch) ---`);
 
-            // STEP 1: Fetch Standings (Get Records for the Game Cards)
-            await fetchStandingsInMemory();
+            // Reset memory ONLY for Full Fetch (every hour) to rebuild history
+            if (isFullFetch) {
+                console.log("   -> Clearing history cache for full rebuild...");
+                teamGameHistory = {};
+            }
 
-            // STEP 2: Fetch Games (Save Games + Build History)
-            const status = await ingestGamesAndBuildHistory();
+            // STEP 1: Fetch Standings
+            teamRecordsMap = await fetchStandings();
 
-            // STEP 3: Save Teams (Now we have Records AND History)
+            // STEP 2: Fetch Games & Build History
+            // If partial, only fetch today (range=0). If full, fetch +/- 7 days.
+            const range = isFullFetch ? 7 : 0;
+            const status = await ingestGamesAndBuildHistory(range);
+
+            if (isFullFetch) lastFullFetch = now;
+
+            // STEP 3: Save Teams
             await saveTeamProfiles();
 
             // Sleep Logic
@@ -52,8 +52,8 @@ async function main() {
                 await sleep(60 * 1000);
             }
             else if (status.nextStart) {
-                const now = new Date();
-                const diffMs = status.nextStart.getTime() - now.getTime();
+                const nowObj = new Date();
+                const diffMs = status.nextStart.getTime() - nowObj.getTime();
                 const wakeUpMs = diffMs - (5 * 60 * 1000);
 
                 if (wakeUpMs > 0) {
@@ -79,28 +79,8 @@ async function main() {
     }
 }
 
-// --- Helper Functions ---
-
-// Step 1: Just get the records
-async function fetchStandingsInMemory() {
-    // console.log("... Step 1: Fetching Standings");
-    const url = `${NHL_API_BASE}/standings/now`;
-    const response = await axios.get<NHLStandingsResponse>(url);
-
-    for (const record of response.data.standings) {
-        const abbrev = record.teamAbbrev.default;
-        // Store entire record object + formatted string
-        teamRecordsMap[abbrev] = {
-            recordString: `${record.wins}-${record.losses}-${record.otLosses}`,
-            raw: record
-        };
-    }
-    console.log(`   -> Memorized records for ${Object.keys(teamRecordsMap).length} teams.`);
-}
-
-// Step 2: Save Games and Build History
-async function ingestGamesAndBuildHistory(): Promise<{ live: boolean, pending: boolean, nextStart: Date | null }> {
-    console.log("... Step 2: Fetching Schedule & Saving Games");
+async function ingestGamesAndBuildHistory(dayRange: number = 7): Promise<{ live: boolean, pending: boolean, nextStart: Date | null }> {
+    console.log(`... Step 2: Fetching Schedule & Saving Games (Range: +/- ${dayRange} days)`);
 
     let liveGameFound = false;
     let pendingGameFound = false;
@@ -108,113 +88,119 @@ async function ingestGamesAndBuildHistory(): Promise<{ live: boolean, pending: b
     const now = new Date();
 
     const datesToFetch: string[] = [];
-    for (let i = -7; i <= 7; i++) {
+    for (let i = -dayRange; i <= dayRange; i++) {
         const d = new Date();
         d.setDate(d.getDate() - i);
         datesToFetch.push(d.toISOString().split('T')[0]);
     }
 
-    const batch = db.batch();
-    let operationCount = 0;
+    let gamesToSave: FirestoreGame[] = [];
 
     for (const date of datesToFetch) {
-        try {
-            const url = `${NHL_API_BASE}/schedule/${date}`;
-            const response = await axios.get<NHLScheduleResponse>(url);
+        const dayData = await fetchSchedule(date);
+        const dailyGames = dayData?.gameWeek.find(d => d.date === date)?.games;
 
-            const dayData = response.data.gameWeek.find(d => d.date === date);
-            if (!dayData || !dayData.games) continue;
+        if (!dailyGames) continue;
 
-            for (const game of dayData.games) {
-                const status = mapGameStatus(game.gameState);
-                if (status === 'Live') liveGameFound = true;
+        for (const game of dailyGames) {
+            const status = mapGameStatus(game.gameState);
+            if (status === 'Live') liveGameFound = true;
 
-                const gameStart = new Date(game.startTimeUTC);
+            const gameStart = new Date(game.startTimeUTC);
 
-                // Check for pending games: Scheduled but start time is in the past
-                if (status === 'Scheduled' && gameStart <= now) {
-                    pendingGameFound = true;
-                }
+            if (status === 'Scheduled' && gameStart <= now) {
+                pendingGameFound = true;
+            }
 
-                if (gameStart > now) {
-                    if (!nextScheduledGame || gameStart < nextScheduledGame) {
-                        nextScheduledGame = gameStart;
-                    }
-                }
-
-                // Get record from Step 1
-                const homeRecord = teamRecordsMap[game.homeTeam.abbrev]?.recordString || "";
-                const awayRecord = teamRecordsMap[game.awayTeam.abbrev]?.recordString || "";
-                const venueName = game.venue?.default || "Venue TBD";
-
-                const firestoreGame: FirestoreGame = {
-                    gameId: game.id.toString(),
-                    startTime: game.startTimeUTC,
-                    status: status,
-                    venue: venueName,
-                    broadcasts: "",
-                    homeTeam: {
-                        id: game.homeTeam.id,
-                        name: game.homeTeam.placeName.default,
-                        abbrev: game.homeTeam.abbrev,
-                        score: game.homeTeam.score || 0,
-                        logo: game.homeTeam.logo,
-                        record: homeRecord
-                    },
-                    awayTeam: {
-                        id: game.awayTeam.id,
-                        name: game.awayTeam.placeName.default,
-                        abbrev: game.awayTeam.abbrev,
-                        score: game.awayTeam.score || 0,
-                        logo: game.awayTeam.logo,
-                        record: awayRecord
-                    },
-                    apiRaw: game
-                };
-
-                const gameRef = db.collection('games').doc(firestoreGame.gameId);
-                batch.set(gameRef, firestoreGame, { merge: true });
-                operationCount++;
-
-                // Build History (In Memory)
-                if (status === 'Final') {
-                    addToHistory(game.homeTeam.abbrev, firestoreGame, 'home');
-                    addToHistory(game.awayTeam.abbrev, firestoreGame, 'away');
-                }
-
-                if (operationCount >= 400) {
-                    await batch.commit();
-                    operationCount = 0;
+            if (gameStart > now) {
+                if (!nextScheduledGame || gameStart < nextScheduledGame) {
+                    nextScheduledGame = gameStart;
                 }
             }
 
-        } catch (err) {
-            // console.error(`Failed: ${date}`);
+            const homeRecord = teamRecordsMap[game.homeTeam.abbrev]?.recordString || "";
+            const awayRecord = teamRecordsMap[game.awayTeam.abbrev]?.recordString || "";
+            const venueName = game.venue?.default || "Venue TBD";
+
+            // Extract Broadcasts
+            const broadcasts = game.tvBroadcasts?.map((b: any) => b.network).join(", ") || "";
+
+            // Extract Winning Scorer (if exists)
+            const winningGoalScorer = game.winningGoalScorer?.lastName?.default;
+
+            // Extract Game Clock/Period (for Live games)
+            let periodDescriptor = "";
+            let gameClock = "";
+
+            if (game.periodDescriptor) {
+                // e.g. number: 1, periodType: 'REG'
+                const p = game.periodDescriptor;
+                periodDescriptor = p.periodType === 'OT' ? 'OT' : p.periodType === 'SO' ? 'SO' : `P${p.number}`;
+            }
+
+            if (game.clock) {
+                // e.g. timeRemaining: "12:34", inIntermission: false
+                gameClock = game.clock.inIntermission ? "Intermission" : game.clock.timeRemaining;
+            }
+
+            const firestoreGame: FirestoreGame = {
+                gameId: game.id.toString(),
+                startTime: game.startTimeUTC,
+                status: status,
+                venue: venueName,
+                broadcasts: broadcasts,
+                winningGoalScorer: winningGoalScorer,
+                periodDescriptor: periodDescriptor,
+                gameClock: gameClock,
+                homeTeam: {
+                    id: game.homeTeam.id,
+                    name: game.homeTeam.placeName.default,
+                    abbrev: game.homeTeam.abbrev,
+                    score: game.homeTeam.score || 0,
+                    logo: getEspnLogoUrl(game.homeTeam.abbrev),
+                    record: homeRecord
+                },
+                awayTeam: {
+                    id: game.awayTeam.id,
+                    name: game.awayTeam.placeName.default,
+                    abbrev: game.awayTeam.abbrev,
+                    score: game.awayTeam.score || 0,
+                    logo: getEspnLogoUrl(game.awayTeam.abbrev),
+                    record: awayRecord
+                },
+                apiRaw: game
+            };
+
+            gamesToSave.push(firestoreGame);
+
+            if (status === 'Final') {
+                addToHistory(game.homeTeam.abbrev, firestoreGame, 'home');
+                addToHistory(game.awayTeam.abbrev, firestoreGame, 'away');
+            }
         }
     }
 
-    if (operationCount > 0) {
-        await batch.commit();
-        console.log(`   -> Updated ${operationCount} games.`);
+    if (gamesToSave.length > 0) {
+        // Save in chunks of 400 to avoid batch limits
+        const chunkSize = 400;
+        for (let i = 0; i < gamesToSave.length; i += chunkSize) {
+            await batchSaveGames(gamesToSave.slice(i, i + chunkSize));
+        }
+        console.log(`   -> Updated ${gamesToSave.length} games.`);
     }
 
     return { live: liveGameFound, pending: pendingGameFound, nextStart: nextScheduledGame };
 }
 
-// Step 3: Write the Teams (Now using the history from Step 2)
 async function saveTeamProfiles() {
     console.log("... Step 3: Saving Team Profiles (with History)");
-    const batch = db.batch();
-    let count = 0;
 
-    // Iterate through the records we fetched in Step 1
+    let teamsToSave: FirestoreTeam[] = [];
+
     for (const [abbrev, data] of Object.entries(teamRecordsMap)) {
-        const recordData = data as any;
-
-        // Get the history we built in Step 2
+        const recordData = data;
         const rawHistory = teamGameHistory[abbrev] || [];
 
-        // Sort newest first
         const last5Games = rawHistory
             .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
             .slice(0, 5);
@@ -223,33 +209,23 @@ async function saveTeamProfiles() {
             teamId: abbrev,
             name: recordData.raw.teamName.default || recordData.raw.teamAbbrev.default,
             record: recordData.recordString,
-            logo: `https://assets.nhle.com/logos/nhl/svg/${abbrev}_light.svg`,
+            logo: await fetchSvgAsBase64(abbrev),
             last5Games: last5Games
         };
 
-        const teamRef = db.collection('teams').doc(abbrev);
-        batch.set(teamRef, teamData, { merge: true });
-        count++;
+        teamsToSave.push(teamData);
     }
 
-    if (count > 0) {
-        await batch.commit();
-        console.log(`   -> Updated ${count} team profiles.`);
+    if (teamsToSave.length > 0) {
+        await batchSaveTeams(teamsToSave);
+        console.log(`   -> Updated ${teamsToSave.length} team profiles.`);
     }
-}
-
-// --- Utils ---
-
-function mapGameStatus(apiStatus: string): string {
-    if (apiStatus === "OFF" || apiStatus === "FINAL") return "Final";
-    if (apiStatus === "LIVE" || apiStatus === "CRIT") return "Live";
-    return "Scheduled";
 }
 
 function addToHistory(teamAbbrev: string, game: FirestoreGame, side: 'home' | 'away') {
     if (!teamGameHistory[teamAbbrev]) teamGameHistory[teamAbbrev] = [];
-    const exists = teamGameHistory[teamAbbrev].some(g => g.gameId === game.gameId);
-    if (exists) return;
+    if (!teamGameHistory[teamAbbrev]) teamGameHistory[teamAbbrev] = [];
+    // Removed early return to allow updates
 
     let result = 'Scheduled';
     const isHome = side === 'home';
@@ -257,7 +233,6 @@ function addToHistory(teamAbbrev: string, game: FirestoreGame, side: 'home' | 'a
     const oppScore = isHome ? game.awayTeam.score : game.homeTeam.score;
     const opponent = isHome ? game.awayTeam.abbrev : game.homeTeam.abbrev;
 
-    // Use specific vs/@ logic
     const opponentDisplay = isHome ? `vs ${opponent}` : `@ ${opponent}`;
 
     if (game.status === 'Final') {
@@ -266,17 +241,52 @@ function addToHistory(teamAbbrev: string, game: FirestoreGame, side: 'home' | 'a
         else result = 'T';
     }
 
-    teamGameHistory[teamAbbrev].push({
+    const opponentLogo = isHome ? game.awayTeam.logo : game.homeTeam.logo;
+
+    const newHistoryItem: HistoryGame = {
         gameId: game.gameId,
         date: game.startTime,
-        opponent: opponentDisplay, // e.g. "vs BOS"
+        opponent: opponentDisplay,
+        opponentLogo: opponentLogo,
         score: `${myScore}-${oppScore}`,
         outcome: result
-    });
+    };
+
+    const existingIndex = teamGameHistory[teamAbbrev].findIndex(g => g.gameId === game.gameId);
+    if (existingIndex !== -1) {
+        // Update existing entry (e.g. score changed, game went final)
+        teamGameHistory[teamAbbrev][existingIndex] = newHistoryItem;
+    } else {
+        // Add new entry
+        teamGameHistory[teamAbbrev].push(newHistoryItem);
+    }
 }
 
-function sleep(ms: number) {
-    return new Promise(resolve => setTimeout(resolve, ms));
+// Helper to fetch SVG and return as Base64 Data URI
+async function fetchSvgAsBase64(abbrev: string): Promise<string> {
+    const url = `https://assets.nhle.com/logos/nhl/svg/${abbrev}_light.svg`;
+    try {
+        const response = await axios.get(url, { responseType: 'arraybuffer' });
+        const base64 = Buffer.from(response.data, 'binary').toString('base64');
+        return `data:image/svg+xml;base64,${base64}`;
+    } catch (e) {
+        console.error(`   ⚠️ Failed to fetch SVG for ${abbrev}, falling back to ESPN PNG.`);
+        return getEspnLogoUrl(abbrev);
+    }
+}
+
+function getEspnLogoUrl(abbrev: string): string {
+    const code = abbrev.toUpperCase();
+    const corrections: Record<string, string> = {
+        'SJS': 'sj',
+        'LAK': 'la',
+        'TBL': 'tb',
+        'NJD': 'nj',
+        'UTA': 'utah',
+        'VGK': 'vgs'
+    };
+    const cleanCode = corrections[code] || code.toLowerCase();
+    return `https://a.espncdn.com/i/teamlogos/nhl/500/${cleanCode}.png`;
 }
 
 main();

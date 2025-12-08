@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart'; // Added this for date formatting
+import 'package:intl/intl.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import '../models/team_model.dart';
 import '../services/firestore_service.dart';
 import '../widgets/team_logo.dart'; 
-import '../widgets/background_wrapper.dart'; 
+import '../widgets/background_wrapper.dart';
 
 class TeamDetailScreen extends StatelessWidget {
   final String teamId; // e.g. "TOR"
@@ -15,7 +16,17 @@ class TeamDetailScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(teamId.toUpperCase()),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SvgPicture.asset(
+              'assets/images/nhl_logo.svg',
+              height: 24,
+            ),
+            const SizedBox(width: 8),
+            Text(teamId.toUpperCase()),
+          ],
+        ),
       ),
       body: BackgroundWrapper(
         child: StreamBuilder<TeamModel>(
@@ -40,7 +51,7 @@ class TeamDetailScreen extends StatelessWidget {
                   // --- 1. TEAM HEADER ---
                   Hero(
                     tag: 'team_logo_${team.id}',
-                    child: TeamLogo(teamAbbrev: team.id, size: 120),
+                    child: TeamLogo(teamAbbrev: team.id, logoUrl: team.logo, size: 120),
                   ),
                   const SizedBox(height: 20),
                   
@@ -154,7 +165,11 @@ class TeamDetailScreen extends StatelessWidget {
                               ),
                               
                               // Opponent Logo
-                              TeamLogo(teamAbbrev: oppAbbrev, size: 30),
+                              TeamLogo(
+                                teamAbbrev: oppAbbrev, 
+                                logoUrl: game.opponentLogo,
+                                size: 30
+                              ),
                               const SizedBox(width: 12),
                               
                               // Opponent Text
